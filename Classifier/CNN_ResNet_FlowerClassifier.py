@@ -73,16 +73,26 @@ import torch.optim as optim
 import torchvision.transforms as transforms
 from torchvision.models import resnet18
 from torch.utils.data import DataLoader, TensorDataset
+from openpyxl import Workbook, load_workbook
 
 
 class FlowerClassifier:
-    def __init__(self, class_names=["Daisy", "Lily", "Jasmine"], num_samples=10, num_epochs=10, batch_size=4, lr=0.001):
+    def __init__(self, class_names=["Daisy", "Lily", "Jasmine"], num_samples=20, num_epochs=10, batch_size=4, lr=0.001,
+                 output_file="predictions.xlsx"):
         self.class_names = class_names
         self.num_samples = num_samples
         self.num_epochs = num_epochs
         self.batch_size = batch_size
         self.lr = lr
         self.model_path = "model_state.pth"
+        self.output_file = output_file
+        if not os.path.exists(self.output_file):
+            wb = Workbook()
+            ws = wb.active
+            ws.append(["Prediction", "True Result", "Match"])  # Add header
+            wb.save(self.output_file)
+        else:
+            self.wb = load_workbook(self.output_file)
         # Check if 'data' directory exists. If not, create directories for three classes.
         if not os.path.exists('data'):
             for class_name in self.class_names:
@@ -189,6 +199,7 @@ class FlowerClassifier:
     def predict(self):
         """Performs real-time predictions using the webcam feed."""
         cap = cv2.VideoCapture(0)
+        true_label = None
         while True:
             ret, frame = cap.read()
             if not ret:
@@ -209,11 +220,34 @@ class FlowerClassifier:
             cv2.imshow('Predictions', frame)
 
             # Exit loop on pressing 'q' key.
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('d'):
+                true_label = "Daisy"
+                print("THE Current picture is a daisy")
+            elif key == ord('l'):
+                true_label = "Lily"
+                print("THE Current picture is a lily")
+            elif key == ord('j'):
+                true_label = "Jasmine"
+                print("THE Current picture is a jasmine")
+            elif key == ord('e'):
+                true_label = None
+                print("Current prediction is finished, waiting for the next one.")
+            elif key == ord('q'):
+                break  # Exit the loop on 'q'
+            if true_label is not None:
+                # Compare prediction with true label
+                match = 1 if label == true_label else 0
+                # Write the results to Excel
+                self.write_to_excel(label, true_label, match)
         cap.release()
         cv2.destroyAllWindows()
 
+    def write_to_excel(self, prediction, true_label, match):
+        wb = load_workbook(self.output_file)
+        ws = wb.active
+        ws.append([prediction, true_label, match])  # Append the row
+        wb.save(self.output_file)
 
 def main():
     # Create an instance of the FlowerClassifier class
