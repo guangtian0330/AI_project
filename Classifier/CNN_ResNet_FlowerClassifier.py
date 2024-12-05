@@ -71,10 +71,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torchvision.transforms as transforms
-from torchvision.models import resnet18
+from torchvision.models import resnet34
 from torch.utils.data import DataLoader, TensorDataset
 from openpyxl import Workbook, load_workbook
-
+import pandas as pd
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
 
 class FlowerClassifier:
     def __init__(self, class_names=["Daisy", "Lily", "Jasmine"], num_samples=20, num_epochs=10, batch_size=4, lr=0.001,
@@ -107,13 +108,30 @@ class FlowerClassifier:
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.Adam(self.model.fc.parameters(), lr=self.lr)
 
+        def preprocess_with_denoise(frame):
+            # 转为灰度图
+            gray_image = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # 应用高斯模糊
+            blurred_image = cv2.GaussianBlur(gray_image, (5, 5), 0)
+            # 转回彩色
+            processed_image = cv2.cvtColor(blurred_image, cv2.COLOR_GRAY2BGR)
+            return processed_image
+
+        class CustomTransform:
+            def __call__(self, frame):
+                # 调用自定义的 OpenCV 处理逻辑
+                processed_frame = preprocess_with_denoise(frame)
+                return processed_frame
+
         # Define the transformations for preprocessing the images.
         self.data_transforms = transforms.Compose([
+            CustomTransform(),  # Custom preprocessing step
             transforms.ToPILImage(),  # Convert image to PIL Image format.
-            transforms.Resize((224, 224)),  # Resize to fit ResNet18's input size.
+            transforms.Resize((256, 256)),  # Resize to fit ResNet18's input size.
             # Apply random augmentations to increase dataset variety.
             transforms.RandomHorizontalFlip(),
-            transforms.RandomRotation(10),
+            transforms.RandomRotation(15),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
             transforms.ToTensor(),
             # Normalize according to values suitable for ResNet18.
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -121,7 +139,7 @@ class FlowerClassifier:
 
     def _initialize_model(self):
         # Load the pre-trained ResNet18 model.
-        model = resnet18(pretrained=True)
+        model = resnet34(pretrained=True)
         # Freeze all layers in the model. We'll only train the final layer.
         for param in model.parameters():
             param.requires_grad = False
@@ -249,6 +267,26 @@ class FlowerClassifier:
         ws.append([prediction, true_label, match])  # Append the row
         wb.save(self.output_file)
 
+    def calculate_metrics(self):
+        data = pd.read_excel(self.output_file)
+        required_columns = ["Prediction", "True Result"]
+        if not all(col in data.columns for col in required_columns):
+            raise ValueError(f"The Excel file must contain the columns: {required_columns}")
+        predictions = data["Prediction"]
+        true_labels = data["True Result"]
+        # Calculate the accuracy
+        accuracy = accuracy_score(true_labels, predictions)
+        # Calculate F1 Score
+        f1 = f1_score(true_labels, predictions, average="macro")
+        # Generate the confusion matrix
+        conf_matrix = confusion_matrix(true_labels, predictions, labels=true_labels.unique())
+        # Print the evaluation results.
+        print(f"Accuracy: {accuracy:.4f}")
+        print(f"F1 Score (Macro): {f1:.4f}")
+        print("Confusion Matrix:")
+        print(conf_matrix)
+        return accuracy, f1, conf_matrix
+
 def main():
     # Create an instance of the FlowerClassifier class
     flower_classifier = FlowerClassifier()
@@ -265,6 +303,7 @@ def main():
     flower_classifier.load_model()
     # Run real-time predictions using webcam
     flower_classifier.predict()
+    accuracy, f1, conf_matrix = flower_classifier.calculate_metrics()
 
 
 if __name__ == "__main__":
